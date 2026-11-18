@@ -3,7 +3,7 @@
 // ------------------------------------------------------------
 window.CONFIG = {
   // 1. Paste your TMDB API key between the quotes (used for posters and search).
-  TMDB_API_KEY: "PASTE_YOUR_TMDB_API_KEY_HERE",
+  TMDB_API_KEY: "f628f606d21a3bc4f193c9ff712c594eE",
 
   // 2. Where the reviews are saved (the private repo). Already set for you.
   GITHUB_OWNER: "Dhahine",
