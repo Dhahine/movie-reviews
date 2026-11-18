@@ -296,16 +296,24 @@
   }
 
   /* ---------- TMDB ---------- */
-  const keyMissing = () => !C.TMDB_API_KEY || C.TMDB_API_KEY.startsWith('PASTE_');
+  // Remove stray spaces, quotes or line breaks that can sneak in when pasting the key.
+  const tmdbKey = () => String(C.TMDB_API_KEY || '').replace(/[\s"'\u2018\u2019\u201C\u201D]/g, '');
+  const keyMissing = () => !tmdbKey() || tmdbKey().startsWith('PASTE_');
   async function tmdbSearch(query) {
+    const key = tmdbKey();
     const url = new URL('https://api.themoviedb.org/3/search/movie');
     url.searchParams.set('query', query);
     url.searchParams.set('include_adult', 'false');
     const headers = {};
-    if (C.TMDB_API_KEY.startsWith('eyJ')) headers.Authorization = 'Bearer ' + C.TMDB_API_KEY;   // v4 token
-    else url.searchParams.set('api_key', C.TMDB_API_KEY);
-    const res = await fetch(url, { headers });
-    if (!res.ok) throw new Error('TMDB error ' + res.status);
+    if (key.startsWith('eyJ')) headers.Authorization = 'Bearer ' + key;   // v4 token
+    else url.searchParams.set('api_key', key);
+    let res;
+    try {
+      res = await fetch(url.toString(), { headers });
+    } catch (e) {
+      throw new Error('network');
+    }
+    if (!res.ok) throw new Error('http ' + res.status);
     return (await res.json()).results || [];
   }
 
@@ -547,7 +555,11 @@
               <div><div class="t">${esc(f.title)}</div><div class="y">${esc(f.year || 'Year unknown')}</div><div class="o">${esc(f.overview)}</div></div>
             </button>`).join('') : '<p class="notice">No matches. Try another spelling, or add it by hand.</p>';
         } catch (err) {
-          results.innerHTML = '<p class="notice">Search didn’t work. Check the TMDB key in config.js, or add the movie by hand.</p>';
+          let why;
+          if (err.message === 'network') why = 'This device couldn’t reach TMDB. Try another network (mobile data or Wi-Fi), or turn off any ad blocker or private DNS.';
+          else if (err.message === 'http 401') why = 'TMDB rejected the key in config.js. Check that it was copied completely, with nothing else on the line.';
+          else why = 'TMDB returned an error (' + esc(err.message) + ').';
+          results.innerHTML = `<p class="notice">${why} You can also add the movie by hand below.</p>`;
         }
       }, 350);
     });
