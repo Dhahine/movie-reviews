@@ -76,9 +76,22 @@ button { font: inherit; color: inherit; }
 .pill[data-state="err"]::before { background: var(--danger); }
 @keyframes pulse { 50% { opacity: 0.25; } }
 
+.brand-text b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.add .plus { display: none; }
+
+/* Phones: the "Add movie" button becomes a round "+" so the header still fits */
 @media (max-width: 520px) {
-  .actions .btn.small { display: none; }          /* the "+" lives on the home screen too */
+  .actions { gap: 6px; }
+  .actions .btn.add {
+    display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border-radius: 50%;
+  }
+  .add .lbl { display: none; }
+  .add .plus { display: block; font-size: 1.6rem; line-height: 1; margin-top: -2px; }
+  .pill { padding: 5px 9px; font-size: 0.75rem; }
   .brand-text small { max-width: 120px; }
+}
+@media (max-width: 440px) {
+  .brand-text small { display: none; }
 }
 
 /* ---------- Layout ---------- */
