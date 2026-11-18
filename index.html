@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Movie Nights</title>
+  <meta name="theme-color" content="#11141c">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Movie Nights">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" href="icon-192.png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <a href="#/" class="brand" aria-label="Movie Nights, home">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+        <rect width="32" height="32" rx="9" fill="#e8b64c"/>
+        <path d="M12 9.5v13l11-6.5z" fill="#1b1405"/>
+      </svg>
+      <span class="brand-text"><b>Movie Nights</b><small id="tagline"></small></span>
+    </a>
+    <div class="actions">
+      <button id="syncpill" class="pill" data-state="ok" type="button">Synced</button>
+      <a class="btn small primary" href="#/add">Add movie</a>
+      <a class="icon-btn" href="#/settings" aria-label="Settings" title="Settings">&#9881;&#xFE0E;</a>
+    </div>
+  </header>
+
+  <main id="view" aria-live="polite"></main>
+
+  <footer>
+    This product uses the TMDB API but is not endorsed or certified by TMDB.
+  </footer>
+
+  <div id="toast" role="status"></div>
+
+  <noscript><p style="padding:24px">Movie Nights needs JavaScript to run.</p></noscript>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
