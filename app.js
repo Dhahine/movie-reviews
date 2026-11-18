@@ -335,6 +335,7 @@
 
   /* ---------- screens ---------- */
   let me = null;
+  let editingId = null;   // movie whose review is currently open for editing
 
   function viewWelcome() {
     $('#view').innerHTML = `
@@ -425,7 +426,7 @@
 
     const cards = USERS.map((u, i) => {
       const r = rs[u];
-      if (u === me) {
+      if (u === me && (!r || editingId === id)) {
         const startVal = r ? r.rating : 7;
         const status = r ? (r.pending ? '<span class="tag wait">Waiting to sync</span>' : '<span class="tag">Saved</span>') : '';
         return `
@@ -435,7 +436,10 @@
           <input id="rv-rating" type="range" min="0" max="10" step="0.5" value="${startVal}">
           <label for="rv-text">What did you think?</label>
           <textarea id="rv-text" placeholder="Write what you liked, what you didn’t, who you’d recommend it to…">${esc(r ? r.text : '')}</textarea>
-          <button class="btn primary" type="submit">${r ? 'Update review' : 'Save review'}</button>
+          <div class="row">
+            <button class="btn primary" type="submit">Save review</button>
+            ${r ? '<button class="btn ghost" type="button" id="cancelrv">Cancel</button>' : ''}
+          </div>
         </form>`;
       }
       if (!r) {
@@ -452,6 +456,7 @@
           <div class="bar"><i style="width:${Math.min(100, r.rating * 10)}%"></i></div>
           ${r.text ? `<p class="text">${esc(r.text)}</p>` : '<p class="muted">No written review.</p>'}
           <p class="when">${esc(fmtDate(r.updatedAt))}</p>
+          ${u === me ? '<button class="btn" type="button" id="editrv">Update review</button>' : ''}
         </div>`;
     }).join('');
 
@@ -491,11 +496,16 @@
           updatedAt: Date.now(), sha: prev?.sha || null, pending: true,
         });
         toast(navigator.onLine ? 'Saved. Syncing…' : 'Saved on this device. It will sync when you’re online.');
+        editingId = null;
         await render();
         lastAttempt = 0;
         sync();
       });
     }
+    const editBtn = $('#editrv');
+    if (editBtn) editBtn.addEventListener('click', () => { editingId = id; render(); });
+    const cancelBtn = $('#cancelrv');
+    if (cancelBtn) cancelBtn.addEventListener('click', () => { editingId = null; render(); });
   }
 
   async function addMovie(movie) {
@@ -641,6 +651,7 @@
   }
   // After a background sync, refresh the screen unless the person is typing.
   function softRender() {
+    if (editingId) return;
     const a = document.activeElement;
     if (a && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT')) return;
     render();
@@ -650,7 +661,7 @@
   async function boot() {
     $('#tagline').textContent = USERS.join(' & ');
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
-    window.addEventListener('hashchange', () => { window.scrollTo(0, 0); render(); });
+    window.addEventListener('hashchange', () => { editingId = null; window.scrollTo(0, 0); render(); });
     window.addEventListener('online', () => { lastAttempt = 0; sync(); });
     window.addEventListener('offline', updatePill);
     document.addEventListener('visibilitychange', () => { if (!document.hidden) sync(); });

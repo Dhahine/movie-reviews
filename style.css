@@ -213,7 +213,8 @@ input[type="range"] { width: 100%; accent-color: var(--who, var(--gold)); height
 .card .text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .card .when { margin-top: 12px; color: var(--muted); font-size: 0.8rem; }
 .card.waiting { border-left-style: dashed; color: var(--muted); }
-.card form .btn { margin-top: 14px; }
+.card form .row .btn { margin-top: 0; }
+.card > .btn { margin-top: 14px; }
 output { color: var(--who); font-weight: 700; font-variant-numeric: tabular-nums; }
 
 /* ---------- Add movie ---------- */
