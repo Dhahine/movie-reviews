@@ -333,6 +333,64 @@
     }
   }, true);
 
+  /* ---------- sky backgrounds (picked in Settings, saved on this device only) ---------- */
+  // dim = automatic darkening so text stays readable on bright skies
+  const SKIES = [
+    { id: 'sky-01', name: 'Midnight', dim: 0.1 },
+    { id: 'sky-02', name: 'Pink morning', dim: 0.5 },
+    { id: 'sky-03', name: 'Violet dusk', dim: 0.15 },
+    { id: 'sky-04', name: 'Golden cloud', dim: 0.5 },
+    { id: 'sky-05', name: 'Blue cumulus', dim: 0.55 },
+    { id: 'sky-06', name: 'Ember sunset', dim: 0.45 },
+    { id: 'sky-07', name: 'Mint haze', dim: 0.55 },
+    { id: 'sky-08', name: 'Ash storm', dim: 0.5 },
+    { id: 'sky-09', name: 'Soft blue', dim: 0.55 },
+    { id: 'sky-10', name: 'Magenta bloom', dim: 0.5 },
+    { id: 'sky-11', name: 'Ocean blue', dim: 0.5 },
+    { id: 'sky-12', name: 'Lightning', dim: 0.1 },
+    { id: 'sky-13', name: 'Cream mist', dim: 0.55 },
+    { id: 'sky-14', name: 'Peach dusk', dim: 0.4 },
+    { id: 'sky-15', name: 'Lavender grey', dim: 0.5 },
+    { id: 'sky-16', name: 'Ivory cloud', dim: 0.55 },
+    { id: 'sky-17', name: 'Noon white', dim: 0.55 },
+    { id: 'sky-18', name: 'Pink sun', dim: 0.55 },
+    { id: 'sky-19', name: 'Cyan puff', dim: 0.55 },
+    { id: 'sky-20', name: 'Moonlit', dim: 0.55 }
+  ];
+  const BG_KEY = 'movie-nights-bg';
+  function loadBgPref() {
+    try { return JSON.parse(localStorage.getItem(BG_KEY) || '{}') || {}; } catch (e) { return {}; }
+  }
+  function saveBgPref(p) {
+    try { localStorage.setItem(BG_KEY, JSON.stringify(p)); } catch (e) { /* storage blocked: choice just won't persist */ }
+  }
+  function currentSky() {
+    const p = loadBgPref();
+    return SKIES.find((s) => s.id === p.id) || null;
+  }
+  function currentDim() {
+    const p = loadBgPref(), sky = currentSky();
+    if (!sky) return 0;
+    return typeof p.dim === 'number' ? p.dim : sky.dim;
+  }
+  function applyBg() {
+    const sky = currentSky();
+    const el = $('#bg');
+    document.body.classList.toggle('has-bg', !!sky);
+    el.style.backgroundImage = sky ? `url("backgrounds/${sky.id}.png")` : '';
+    el.style.setProperty('--dim', sky ? currentDim() : 0);
+  }
+  // Only switch once the picture has really loaded (so offline never leaves a blank screen).
+  function chooseSky(id, done) {
+    const p = loadBgPref();
+    if (id === 'none') { p.id = 'none'; saveBgPref(p); applyBg(); if (done) done(); return; }
+    if (!SKIES.some((s) => s.id === id)) return;
+    const img = new Image();
+    img.onload = () => { p.id = id; saveBgPref(p); applyBg(); if (done) done(); };
+    img.onerror = () => toast('That background isn’t on this device yet. Connect to the internet once to download it.');
+    img.src = `backgrounds/${id}.png`;
+  }
+
   /* ---------- screens ---------- */
   let me = null;
   let editingId = null;   // movie whose review is currently open for editing
@@ -613,8 +671,23 @@
         </div>
 
         <div class="panel">
+          <h2>Background</h2>
+          <p class="muted small">Saved on this device only, so you can each pick your own.</p>
+          <div class="bggrid" role="group" aria-label="Background">
+            <button type="button" class="bgtile bgnone" data-bg="none" aria-pressed="false"><span>Plain</span></button>
+            ${SKIES.map((s) => `<button type="button" class="bgtile" data-bg="${s.id}" aria-pressed="false" title="${esc(s.name)}"><img src="backgrounds/thumbs/${s.id}.png" alt="${esc(s.name)}" loading="lazy" width="288" height="162"></button>`).join('')}
+          </div>
+          <div class="dimrow">
+            <label for="dim">Dim: <output id="dimout">0</output>%</label>
+            <button id="dimauto" class="btn small ghost" type="button">Automatic</button>
+          </div>
+          <input id="dim" type="range" min="0" max="80" step="5" value="0">
+        </div>
+
+        <div class="panel">
           <h2>About</h2>
           <p class="muted small">Reviews are saved on each device first, so everything works offline. They are shared through the private repo ${esc(C.GITHUB_OWNER)}/${esc(C.DATA_REPO)}.</p>
+          <p class="muted small" style="margin-top:8px">Sky backgrounds: free pack from Craftpix.net.</p>
         </div>
       </section>`;
 
@@ -623,6 +696,38 @@
       await setMeta('me', me);
       toast('Now writing as ' + me + '.');
     }));
+    // --- background picker ---
+    const dimInput = $('#dim'), dimOut = $('#dimout');
+    const refreshPicker = () => {
+      const sky = currentSky();
+      document.querySelectorAll('.bgtile').forEach((b) => {
+        const on = b.dataset.bg === (sky ? sky.id : 'none');
+        b.classList.toggle('on', on);
+        b.setAttribute('aria-pressed', String(on));
+      });
+      const d = Math.round(currentDim() * 100);
+      dimInput.disabled = !sky;
+      $('#dimauto').disabled = !sky;
+      dimInput.value = d;
+      dimOut.textContent = d;
+    };
+    refreshPicker();
+    document.querySelectorAll('.bgtile').forEach((b) => b.addEventListener('click', () => chooseSky(b.dataset.bg, refreshPicker)));
+    dimInput.addEventListener('input', () => {
+      const p = loadBgPref();
+      p.dim = Number(dimInput.value) / 100;
+      saveBgPref(p);
+      applyBg();
+      dimOut.textContent = dimInput.value;
+    });
+    $('#dimauto').addEventListener('click', () => {
+      const p = loadBgPref();
+      delete p.dim;
+      saveBgPref(p);
+      applyBg();
+      refreshPicker();
+    });
+
     $('#savetok').addEventListener('click', async () => {
       const v = $('#tok').value.trim();
       if (!v) { toast('Paste the token first.'); return; }
@@ -659,6 +764,7 @@
 
   /* ---------- start ---------- */
   async function boot() {
+    applyBg();
     $('#tagline').textContent = USERS.join(' & ');
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
     window.addEventListener('hashchange', () => { editingId = null; window.scrollTo(0, 0); render(); });
