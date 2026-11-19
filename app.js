@@ -334,28 +334,28 @@
   }, true);
 
   /* ---------- sky backgrounds (picked in Settings, saved on this device only) ---------- */
-  // dim = automatic darkening so text stays readable on bright skies
+  // dim = automatic darkening so text stays readable on bright skies; top/bottom = edge colours used to extend the picture on tall screens
   const SKIES = [
-    { id: 'sky-01', name: 'Midnight', dim: 0.1 },
-    { id: 'sky-02', name: 'Pink morning', dim: 0.5 },
-    { id: 'sky-03', name: 'Violet dusk', dim: 0.15 },
-    { id: 'sky-04', name: 'Golden cloud', dim: 0.5 },
-    { id: 'sky-05', name: 'Blue cumulus', dim: 0.55 },
-    { id: 'sky-06', name: 'Ember sunset', dim: 0.45 },
-    { id: 'sky-07', name: 'Mint haze', dim: 0.55 },
-    { id: 'sky-08', name: 'Ash storm', dim: 0.5 },
-    { id: 'sky-09', name: 'Soft blue', dim: 0.55 },
-    { id: 'sky-10', name: 'Magenta bloom', dim: 0.5 },
-    { id: 'sky-11', name: 'Ocean blue', dim: 0.5 },
-    { id: 'sky-12', name: 'Lightning', dim: 0.1 },
-    { id: 'sky-13', name: 'Cream mist', dim: 0.55 },
-    { id: 'sky-14', name: 'Peach dusk', dim: 0.4 },
-    { id: 'sky-15', name: 'Lavender grey', dim: 0.5 },
-    { id: 'sky-16', name: 'Ivory cloud', dim: 0.55 },
-    { id: 'sky-17', name: 'Noon white', dim: 0.55 },
-    { id: 'sky-18', name: 'Pink sun', dim: 0.55 },
-    { id: 'sky-19', name: 'Cyan puff', dim: 0.55 },
-    { id: 'sky-20', name: 'Moonlit', dim: 0.55 }
+    { id: 'sky-01', name: 'Midnight', dim: 0.1, top: '#001557', bottom: '#002390' },
+    { id: 'sky-02', name: 'Pink morning', dim: 0.5, top: '#ff7cab', bottom: '#fd96a5' },
+    { id: 'sky-03', name: 'Violet dusk', dim: 0.15, top: '#5e3884', bottom: '#8d60bf' },
+    { id: 'sky-04', name: 'Golden cloud', dim: 0.5, top: '#72aef9', bottom: '#c48d85' },
+    { id: 'sky-05', name: 'Blue cumulus', dim: 0.55, top: '#6d84ec', bottom: '#ddeafd' },
+    { id: 'sky-06', name: 'Ember sunset', dim: 0.45, top: '#996278', bottom: '#c0696b' },
+    { id: 'sky-07', name: 'Mint haze', dim: 0.55, top: '#9bd7db', bottom: '#d9f8fa' },
+    { id: 'sky-08', name: 'Ash storm', dim: 0.5, top: '#d9d6cd', bottom: '#555a58' },
+    { id: 'sky-09', name: 'Soft blue', dim: 0.55, top: '#a7caff', bottom: '#d1dbeb' },
+    { id: 'sky-10', name: 'Magenta bloom', dim: 0.5, top: '#664dd4', bottom: '#821477' },
+    { id: 'sky-11', name: 'Ocean blue', dim: 0.5, top: '#0066b8', bottom: '#1189c7' },
+    { id: 'sky-12', name: 'Lightning', dim: 0.1, top: '#002636', bottom: '#3b6172' },
+    { id: 'sky-13', name: 'Cream mist', dim: 0.55, top: '#d1fef9', bottom: '#b8c7c2' },
+    { id: 'sky-14', name: 'Peach dusk', dim: 0.4, top: '#473ea5', bottom: '#d37f98' },
+    { id: 'sky-15', name: 'Lavender grey', dim: 0.5, top: '#464665', bottom: '#b5b5da' },
+    { id: 'sky-16', name: 'Ivory cloud', dim: 0.55, top: '#6e747d', bottom: '#eff0e2' },
+    { id: 'sky-17', name: 'Noon white', dim: 0.55, top: '#639bff', bottom: '#e3edff' },
+    { id: 'sky-18', name: 'Pink sun', dim: 0.55, top: '#ff5c8b', bottom: '#ffc8d8' },
+    { id: 'sky-19', name: 'Cyan puff', dim: 0.55, top: '#58c5ff', bottom: '#f1faff' },
+    { id: 'sky-20', name: 'Moonlit', dim: 0.55, top: '#222034', bottom: '#4f4d5d' }
   ];
   const BG_KEY = 'movie-nights-bg';
   function loadBgPref() {
@@ -368,6 +368,10 @@
     const p = loadBgPref();
     return SKIES.find((s) => s.id === p.id) || null;
   }
+  function currentFit() {
+    const f = loadBgPref().fit;
+    return f === 'whole' || f === 'zoom' ? f : 'balanced';     // "balanced" is the default
+  }
   function currentDim() {
     const p = loadBgPref(), sky = currentSky();
     if (!sky) return 0;
@@ -377,8 +381,11 @@
     const sky = currentSky();
     const el = $('#bg');
     document.body.classList.toggle('has-bg', !!sky);
-    el.style.backgroundImage = sky ? `url("backgrounds/${sky.id}.png")` : '';
+    el.style.setProperty('--art', sky ? `url("backgrounds/${sky.id}.png")` : 'none');
+    el.style.setProperty('--top', sky ? sky.top : '#11141c');
+    el.style.setProperty('--bottom', sky ? sky.bottom : '#11141c');
     el.style.setProperty('--dim', sky ? currentDim() : 0);
+    el.dataset.fit = currentFit();
   }
   // Only switch once the picture has really loaded (so offline never leaves a blank screen).
   function chooseSky(id, done) {
@@ -682,6 +689,14 @@
             <button id="dimauto" class="btn small ghost" type="button">Automatic</button>
           </div>
           <input id="dim" type="range" min="0" max="80" step="5" value="0">
+          <div class="fitrow">
+            <span>Picture size when the screen is tall (a phone held upright)</span>
+            <div class="seg">
+              <label><input type="radio" name="fit" value="whole"><span>Whole picture</span></label>
+              <label><input type="radio" name="fit" value="balanced"><span>Balanced</span></label>
+              <label><input type="radio" name="fit" value="zoom"><span>Zoomed</span></label>
+            </div>
+          </div>
         </div>
 
         <div class="panel">
@@ -710,6 +725,7 @@
       $('#dimauto').disabled = !sky;
       dimInput.value = d;
       dimOut.textContent = d;
+      document.querySelectorAll('input[name="fit"]').forEach((r) => { r.checked = r.value === currentFit(); r.disabled = !sky; });
     };
     refreshPicker();
     document.querySelectorAll('.bgtile').forEach((b) => b.addEventListener('click', () => chooseSky(b.dataset.bg, refreshPicker)));
@@ -720,6 +736,12 @@
       applyBg();
       dimOut.textContent = dimInput.value;
     });
+    document.querySelectorAll('input[name="fit"]').forEach((r) => r.addEventListener('change', () => {
+      const p = loadBgPref();
+      p.fit = r.value;
+      saveBgPref(p);
+      applyBg();
+    }));
     $('#dimauto').addEventListener('click', () => {
       const p = loadBgPref();
       delete p.dim;

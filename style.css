@@ -260,6 +260,8 @@ details.manual form { display: grid; gap: 10px; margin-top: 12px; }
 .dimrow label { margin: 14px 0 6px; }
 .dimrow .btn { margin-top: 10px; }
 #dim:disabled { opacity: 0.4; }
+.fitrow { margin-top: 16px; }
+.fitrow > span { display: block; font-size: 0.9rem; color: var(--muted); margin-bottom: 6px; }
 
 /* ---------- Toast ---------- */
 #toast {
@@ -281,11 +283,31 @@ details.manual form { display: grid; gap: 10px; margin-top: 12px; }
 #bg {
   position: fixed; z-index: -1; top: 0; left: 0; right: 0;
   height: 100vh; height: 100lvh;                 /* keeps covering the screen when phone bars hide */
-  background: var(--bg) center / cover no-repeat;
-  image-rendering: pixelated;                    /* keep the crisp pixel-art look when scaled */
+  display: grid; place-items: center; overflow: hidden;
+  background: var(--bg);
   pointer-events: none;
 }
+body:not(.has-bg) #bg > * { display: none; }
 #bg::after { content: ""; position: absolute; inset: 0; background: rgba(8, 10, 16, var(--dim, 0)); }
+
+/* flat colours that continue the picture above and below it (used when the screen is taller than the picture) */
+#bg .fill { position: absolute; inset: 0; background: linear-gradient(to bottom, var(--top, #11141c) 50%, var(--bottom, #11141c) 50%); }
+/* the artwork itself: 16:9, filling the screen by default */
+#bg .art {
+  position: relative; flex: none; max-width: none; aspect-ratio: 16 / 9;
+  width: max(100vw, calc(100vh * 16 / 9)); width: max(100vw, calc(100lvh * 16 / 9));
+  background: var(--art, none) center / 100% 100% no-repeat;
+  image-rendering: pixelated;                    /* keep the crisp pixel-art look when scaled */
+}
+/* Tall screens (phone held upright, tablet in portrait): choose how much of the picture to show */
+@media (max-aspect-ratio: 1/1) {
+  #bg[data-fit="whole"] .art, #bg[data-fit="balanced"] .art {
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 22%, #000 78%, transparent 100%);
+    mask-image: linear-gradient(to bottom, transparent 0, #000 22%, #000 78%, transparent 100%);
+  }
+  #bg[data-fit="whole"] .art { width: 100vw; }
+  #bg[data-fit="balanced"] .art { width: max(100vw, calc(100vh * 16 / 9 * 0.55)); width: max(100vw, calc(100lvh * 16 / 9 * 0.55)); }
+}
 
 /* Cards turn into frosted glass so text stays readable on any sky */
 .has-bg { --muted: #bcc2cf; }
