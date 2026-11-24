@@ -98,6 +98,17 @@
     return { complete: false, value: null, count: vals.length };
   }
 
+  // A series is rated season by season: its numbers are averages of its seasons.
+  function seriesStats(seasons, byMovie) {
+    const per = USERS.map((u) => {
+      const v = seasons.map((s) => byMovie[s.id]?.[u]?.rating).filter((x) => typeof x === 'number');
+      return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+    });
+    const done = seasons.map((s) => overall(byMovie[s.id] || {})).filter((o) => o.complete);
+    const avg = done.length ? done.reduce((a, o) => a + o.value, 0) / done.length : null;
+    return { per, avg, done: done.length, total: seasons.length };
+  }
+
   /* ---------- GitHub sync ---------- */
   class SyncError extends Error {
     constructor(message, kind) { super(message); this.kind = kind; }
@@ -138,8 +149,9 @@
   }
 
   const movieFile = (m) => ({
-    id: m.id, title: m.title, year: m.year || '', posterPath: m.posterPath || '',
-    overview: m.overview || '', addedBy: m.addedBy || '', addedAt: m.addedAt || 0,
+    id: m.id, kind: ['series', 'season'].includes(m.kind) ? m.kind : 'movie', title: m.title, year: m.year || '',
+    posterPath: m.posterPath || '', overview: m.overview || '', addedBy: m.addedBy || '', addedAt: m.addedAt || 0,
+    ...(m.kind === 'season' ? { parentId: m.parentId, season: m.season, episodes: m.episodes || 0 } : {}),
   });
   const reviewFile = (r) => ({
     movieId: r.movieId, author: r.author, rating: r.rating, text: r.text || '', updatedAt: r.updatedAt,
@@ -200,7 +212,9 @@
         try { data = JSON.parse(fromB64(blob.content)); } catch (e) { return; }   // skip unreadable files
         if (j.kind === 'movie') {
           await dbPut('movies', {
-            id: j.id, title: data.title || 'Untitled', year: data.year || '', posterPath: data.posterPath || '',
+            id: j.id, kind: ['series', 'season'].includes(data.kind) ? data.kind : 'movie', title: data.title || 'Untitled',
+            parentId: data.parentId || '', season: Number(data.season) || 0, episodes: Number(data.episodes) || 0,
+            year: data.year || '', posterPath: data.posterPath || '',
             overview: data.overview || '', addedBy: data.addedBy || '', addedAt: data.addedAt || 0,
             sha: j.sha, pending: false,
           });
@@ -222,13 +236,15 @@
     const movies = (await dbAll('movies')).filter((m) => m.pending);
     for (const m of movies) {
       const path = `movies/${m.id}.json`;
-      let res = await putFile(path, movieFile(m), m.sha || undefined, `Add movie: ${m.title}`);
+      let res = await putFile(path, movieFile(m), m.sha || undefined, `Add ${m.kind || 'movie'}: ${m.kind === 'season' ? m.parentId + ' season ' + m.season : m.title}`);
       if (res.conflict) res = { sha: await currentSha(path) };      // already there: keep the existing file
       await dbPut('movies', { ...m, sha: res.sha, pending: false });
       pushed++;
     }
 
-    const titles = new Map((await dbAll('movies')).map((m) => [m.id, m.title]));
+    const all = await dbAll('movies');
+    const titles = new Map(all.map((m) => [m.id, m.kind === 'season'
+      ? `${all.find((p) => p.id === m.parentId)?.title || m.parentId} – ${m.title}` : m.title]));
     const reviews = (await dbAll('reviews')).filter((r) => r.pending);
     for (const r of reviews) {
       const path = `reviews/${r.movieId}/${r.author}.json`;
@@ -299,11 +315,10 @@
   // Remove stray spaces, quotes or line breaks that can sneak in when pasting the key.
   const tmdbKey = () => String(C.TMDB_API_KEY || '').replace(/[\s"'\u2018\u2019\u201C\u201D]/g, '');
   const keyMissing = () => !tmdbKey() || tmdbKey().startsWith('PASTE_');
-  async function tmdbSearch(query) {
+  async function tmdbGet(path, params = {}) {
     const key = tmdbKey();
-    const url = new URL('https://api.themoviedb.org/3/search/movie');
-    url.searchParams.set('query', query);
-    url.searchParams.set('include_adult', 'false');
+    const url = new URL('https://api.themoviedb.org/3' + path);
+    Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
     const headers = {};
     if (key.startsWith('eyJ')) headers.Authorization = 'Bearer ' + key;   // v4 token
     else url.searchParams.set('api_key', key);
@@ -314,7 +329,11 @@
       throw new Error('network');
     }
     if (!res.ok) throw new Error('http ' + res.status);
-    return (await res.json()).results || [];
+    return res.json();
+  }
+  async function tmdbSearch(query) {
+    const data = await tmdbGet('/search/multi', { query, include_adult: 'false' });
+    return (data.results || []).filter((r) => r.media_type === 'movie' || r.media_type === 'tv');
   }
 
   /* ---------- little view helpers ---------- */
@@ -424,10 +443,16 @@
     const [movies, reviews, token] = await Promise.all([dbAll('movies'), dbAll('reviews'), getMeta('token')]);
     const byMovie = {};
     reviews.forEach((r) => { (byMovie[r.movieId] ||= {})[r.author] = r; });
-    const items = movies.map((m) => {
+    const seasonsOf = {};
+    movies.filter((m) => m.kind === 'season').forEach((m) => { (seasonsOf[m.parentId] ||= []).push(m); });
+    const latest = (ids) => Math.max(0, ...ids.flatMap((i) => Object.values(byMovie[i] || {}).map((r) => r.updatedAt || 0)));
+    const items = movies.filter((m) => m.kind !== 'season').map((m) => {
+      if (m.kind === 'series') {
+        const ss = seasonsOf[m.id] || [];
+        return { m, ss, st: seriesStats(ss, byMovie), act: Math.max(m.addedAt || 0, latest(ss.map((x) => x.id))) };
+      }
       const rs = byMovie[m.id] || {};
-      const act = Math.max(m.addedAt || 0, ...Object.values(rs).map((r) => r.updatedAt || 0));
-      return { m, rs, act };
+      return { m, rs, act: Math.max(m.addedAt || 0, latest([m.id])) };
     }).sort((a, b) => b.act - a.act);
 
     const banner = token ? '' : `
@@ -436,26 +461,32 @@
     if (!items.length) {
       $('#view').innerHTML = `${banner}
         <div class="empty">
-          <h2>No movies yet</h2>
-          <p>Add the first one you watched together.</p>
-          <a class="btn primary" href="#/add">Add a movie</a>
+          <h2>Nothing here yet</h2>
+          <p>Add the first movie or series you watched together.</p>
+          <a class="btn primary" href="#/add">Add a movie or series</a>
         </div>`;
       return;
     }
 
+    const num = (v) => (v == null ? null : fmtRating(v));
     $('#view').innerHTML = `${banner}
-      <div class="home-head"><input id="filter" type="search" placeholder="Filter your movies" autocomplete="off"></div>
+      <div class="home-head"><input id="filter" type="search" placeholder="Filter your list" autocomplete="off"></div>
       <div class="grid">
-        ${items.map(({ m, rs }) => {
-          const ov = overall(rs);
+        ${items.map(({ m, rs, ss, st }) => {
+          const isSeries = m.kind === 'series';
+          const badge = isSeries ? num(st.avg) : (overall(rs).complete ? num(overall(rs).value) : null);
+          const vals = isSeries ? st.per.map(num) : USERS.map((u) => (rs[u] ? num(rs[u].rating) : null));
+          const sub = isSeries
+            ? [m.year, ss.length ? `${ss.length} season${ss.length === 1 ? '' : 's'}` : 'no seasons yet'].filter(Boolean).join(' · ')
+            : m.year;
           return `
           <a class="mcard" href="#/movie/${encodeURIComponent(m.id)}" data-title="${esc(m.title.toLowerCase())}">
-            <div class="mposter">${poster(m)}${ov.complete ? `<span class="badge">${fmtRating(ov.value)}</span>` : ''}</div>
+            <div class="mposter">${poster(m)}${isSeries ? '<span class="kind">Series</span>' : ''}${badge ? `<span class="badge">${badge}</span>` : ''}</div>
             <div class="mmeta">
               <span class="t">${esc(m.title)}</span>
-              ${m.year ? `<span class="y">${esc(m.year)}</span>` : ''}
-              <span class="scores">${USERS.map((u, i) => rs[u]
-                ? `<i class="u${i}" title="${esc(u)}">${fmtRating(rs[u].rating)}</i>`
+              ${sub ? `<span class="y">${esc(sub)}</span>` : ''}
+              <span class="scores">${USERS.map((u, i) => vals[i]
+                ? `<i class="u${i}" title="${esc(u)}${isSeries ? ' (average)' : ''}">${vals[i]}</i>`
                 : `<i class="none" title="${esc(u)}: no review yet">–</i>`).join('')}</span>
             </div>
           </a>`;
@@ -479,6 +510,8 @@
         </section>`;
       return;
     }
+    if (m.kind === 'series') return viewSeries(m);
+    const parent = m.kind === 'season' ? await dbGet('movies', m.parentId) : null;
     const rs = await reviewsFor(id);
     const ov = overall(rs);
     const mine = rs[me];
@@ -528,13 +561,21 @@
     $('#view').innerHTML = `
       <article class="movie">
         ${m.posterPath ? `<div class="backdrop" style="background-image:url('https://image.tmdb.org/t/p/w342${esc(m.posterPath)}')"></div>` : ''}
-        <a class="back" href="#/">‹ All movies</a>
+        ${m.kind === 'season'
+          ? `<a class="back" href="#/movie/${encodeURIComponent(m.parentId)}">‹ ${esc(parent ? parent.title : 'Back to the series')}</a>`
+          : '<a class="back" href="#/">‹ All movies</a>'}
         <div class="hero">
           <div>${poster(m)}</div>
           <div>
             <h1>${esc(m.title)}</h1>
-            ${m.year ? `<p class="year">${esc(m.year)}</p>` : ''}
-            ${m.overview ? `<p class="overview">${esc(m.overview)}</p>` : ''}
+            ${(() => {
+              const bits = m.kind === 'season'
+                ? [parent && parent.title, m.year, m.episodes ? `${m.episodes} episodes` : '']
+                : [m.year];
+              const line = bits.filter(Boolean).join(' · ');
+              return line ? `<p class="year">${esc(line)}</p>` : '';
+            })()}
+            ${(m.overview || (parent && parent.overview)) ? `<p class="overview">${esc(m.overview || parent.overview)}</p>` : ''}
           </div>
         </div>
 
@@ -573,15 +614,124 @@
     if (cancelBtn) cancelBtn.addEventListener('click', () => { editingId = null; render(); });
   }
 
+  async function viewSeries(m) {
+    const [movies, reviews] = await Promise.all([dbAll('movies'), dbAll('reviews')]);
+    const seasons = movies.filter((x) => x.kind === 'season' && x.parentId === m.id).sort((a, b) => a.season - b.season);
+    const byMovie = {};
+    reviews.forEach((r) => { (byMovie[r.movieId] ||= {})[r.author] = r; });
+    const st = seriesStats(seasons, byMovie);
+    const canLoad = /^tv\d+$/.test(m.id);
+    const num = (v) => (v == null ? '–' : fmtRating(v));
+
+    const rows = seasons.map((s) => {
+      const rs = byMovie[s.id] || {};
+      const ov = overall(rs);
+      const meta = [s.year, s.episodes ? `${s.episodes} episodes` : ''].filter(Boolean).join(' · ');
+      return `
+        <a class="srow" href="#/movie/${encodeURIComponent(s.id)}">
+          <div class="sposter">${poster(s, 'w92')}</div>
+          <div class="sinfo"><b>${esc(s.title)}</b>${meta ? `<span class="muted small">${esc(meta)}</span>` : ''}</div>
+          <div class="sscores">
+            ${USERS.map((u, i) => rs[u] ? `<i class="u${i}" title="${esc(u)}">${fmtRating(rs[u].rating)}</i>` : `<i class="none" title="${esc(u)}: no review yet">–</i>`).join('')}
+            <span class="sov${ov.complete ? '' : ' off'}" title="Overall">${ov.complete ? fmtRating(ov.value) : '–'}</span>
+          </div>
+        </a>`;
+    }).join('');
+
+    $('#view').innerHTML = `
+      <article class="movie">
+        ${m.posterPath ? `<div class="backdrop" style="background-image:url('https://image.tmdb.org/t/p/w342${esc(m.posterPath)}')"></div>` : ''}
+        <a class="back" href="#/">‹ All movies</a>
+        <div class="hero">
+          <div>${poster(m)}</div>
+          <div>
+            <h1>${esc(m.title)}</h1>
+            <p class="year">${esc(['Series', m.year, seasons.length ? `${seasons.length} season${seasons.length === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · '))}</p>
+            ${m.overview ? `<p class="overview">${esc(m.overview)}</p>` : ''}
+          </div>
+        </div>
+
+        <section class="verdict" aria-label="Series ratings">
+          <div class="score u0"><span class="num">${num(st.per[0])}</span><span class="name">${esc(USERS[0])} · average</span></div>
+          <div class="score overall"><span class="num">${num(st.avg)}</span><span class="name">Overall</span></div>
+          <div class="score u1"><span class="num">${num(st.per[1])}</span><span class="name">${esc(USERS[1])} · average</span></div>
+          <p class="hint">${st.total ? `Averages of the seasons. ${st.done} of ${st.total} season${st.total === 1 ? '' : 's'} reviewed by you both.` : 'Add a season to start reviewing.'}</p>
+        </section>
+
+        <h2 class="serif sect">Seasons</h2>
+        ${rows ? `<div class="seasons">${rows}</div>` : '<p class="muted">No seasons yet. Add them below, then tap one to write your reviews.</p>'}
+
+        <details class="manual" ${rows ? '' : 'open'}>
+          <summary>Add a season</summary>
+          <form id="seasonform">
+            <input id="sn" inputmode="numeric" placeholder="Season number, for example ${seasons.length + 1}" maxlength="2" required>
+            <button class="btn" type="submit">Add season</button>
+          </form>
+          ${canLoad ? '<button id="loadseasons" class="btn ghost" type="button" style="margin-top:10px">Load all seasons from TMDB</button>' : ''}
+        </details>
+      </article>`;
+
+    $('#seasonform').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const n = parseInt($('#sn').value, 10);
+      if (!(n >= 1 && n <= 60)) { toast('Enter a season number between 1 and 60.'); return; }
+      const added = await addSeasons(m, [{ season_number: n }]);
+      toast(added ? `Season ${n} added.` : `Season ${n} is already there.`);
+      await render();
+      lastAttempt = 0; sync();
+    });
+    const load = $('#loadseasons');
+    if (load) load.addEventListener('click', async () => {
+      if (!navigator.onLine) { toast('Loading seasons needs internet.'); return; }
+      try {
+        const det = await tmdbGet('/tv/' + m.id.slice(2));
+        const added = await addSeasons(m, det.seasons || []);
+        toast(added ? `${added} season${added === 1 ? '' : 's'} added.` : 'All seasons are already there.');
+        await render();
+        lastAttempt = 0; sync();
+      } catch (err) {
+        toast('Couldn’t load seasons from TMDB. Try again, or add them by hand.');
+      }
+    });
+  }
+
+  // Creates season entries for a series (each one gets its own pair of reviews).
+  async function addSeasons(series, list) {
+    let added = 0;
+    for (const sp of list) {
+      const n = Number(sp.season_number);
+      if (!(n >= 1)) continue;                              // TMDB's "Specials" (season 0) are skipped
+      const id = `${series.id}-s${n}`;
+      if (await dbGet('movies', id)) continue;
+      await dbPut('movies', {
+        id, kind: 'season', parentId: series.id, season: n, title: `Season ${n}`,
+        year: (sp.air_date || '').slice(0, 4), posterPath: sp.poster_path || series.posterPath || '',
+        overview: sp.overview || '', episodes: sp.episode_count || 0,
+        addedBy: me, addedAt: Date.now(), sha: null, pending: true,
+      });
+      added++;
+    }
+    return added;
+  }
+
   async function addMovie(movie) {
     const id = String(movie.id);
     const existing = await dbGet('movies', id);
     if (!existing) {
-      await dbPut('movies', {
-        id, title: movie.title, year: movie.year || '', posterPath: movie.posterPath || '',
-        overview: movie.overview || '', addedBy: me, addedAt: Date.now(), sha: null, pending: true,
-      });
-      toast('Movie added.');
+      const rec = {
+        id, kind: ['series'].includes(movie.kind) ? 'series' : 'movie', title: movie.title, year: movie.year || '',
+        posterPath: movie.posterPath || '', overview: movie.overview || '', addedBy: me, addedAt: Date.now(),
+        sha: null, pending: true,
+      };
+      await dbPut('movies', rec);
+      if (rec.kind === 'series') {
+        if (/^tv\d+$/.test(id) && navigator.onLine && !keyMissing()) {
+          try { await addSeasons(rec, (await tmdbGet('/tv/' + id.slice(2))).seasons || []); } catch (e) { /* can be loaded later from the series page */ }
+        } else if (movie.seasonCount > 0) {
+          await addSeasons(rec, Array.from({ length: movie.seasonCount }, (_, i) => ({ season_number: i + 1 })));
+        }
+      }
+      toast(rec.kind === 'series' ? 'Series added. Open a season to review it.' : 'Movie added.');
     }
     location.hash = '#/movie/' + encodeURIComponent(id);
     lastAttempt = 0;
@@ -591,15 +741,17 @@
   async function viewAdd() {
     $('#view').innerHTML = `
       <section class="narrow">
-        <h1 class="serif big" style="font-size:1.8rem;margin-bottom:14px">Add a movie</h1>
-        <input id="q" type="search" placeholder="Search by title" autocomplete="off">
+        <h1 class="serif big" style="font-size:1.8rem;margin-bottom:14px">Add a movie or series</h1>
+        <input id="q" type="search" placeholder="Search movies and series" autocomplete="off">
         <div id="results" class="results"></div>
         <details class="manual">
           <summary>Can’t find it? Add it by hand</summary>
           <form id="manform">
+            <select id="mk" aria-label="Type"><option value="movie">Movie</option><option value="series">Series</option></select>
             <input id="mt" placeholder="Title" required>
             <input id="my" inputmode="numeric" placeholder="Year (optional)" maxlength="4">
-            <button class="btn" type="submit">Add movie</button>
+            <input id="ms" inputmode="numeric" placeholder="How many seasons? (optional)" maxlength="2" hidden>
+            <button class="btn" type="submit">Add it</button>
           </form>
         </details>
       </section>`;
@@ -617,24 +769,30 @@
       if (keyMissing()) return;
       if (q.length < 2) { results.innerHTML = ''; return; }
       timer = setTimeout(async () => {
-        if (!navigator.onLine) { results.innerHTML = '<p class="notice">Search needs internet. You can add the movie by hand below.</p>'; return; }
+        if (!navigator.onLine) { results.innerHTML = '<p class="notice">Search needs internet. You can add it by hand below.</p>'; return; }
         try {
           const list = await tmdbSearch(q);
-          found = list.slice(0, 12).map((r) => ({
-            id: r.id, title: r.title, year: (r.release_date || '').slice(0, 4),
-            posterPath: r.poster_path || '', overview: r.overview || '',
-          }));
+          found = list.slice(0, 12).map((r) => {
+            const tv = r.media_type === 'tv';
+            return {
+              // series get a "tv" prefix because TMDB can use the same number for a movie and a show
+              id: tv ? 'tv' + r.id : String(r.id), kind: tv ? 'series' : 'movie',
+              title: (tv ? r.name : r.title) || r.title || r.name || 'Untitled',
+              year: ((tv ? r.first_air_date : r.release_date) || '').slice(0, 4),
+              posterPath: r.poster_path || '', overview: r.overview || '',
+            };
+          });
           results.innerHTML = found.length ? found.map((f, i) => `
             <button class="result" type="button" data-i="${i}">
               ${f.posterPath ? `<img class="poster" alt="" src="https://image.tmdb.org/t/p/w92${esc(f.posterPath)}" data-title="${esc(f.title)}">` : '<div class="poster fallback"></div>'}
-              <div><div class="t">${esc(f.title)}</div><div class="y">${esc(f.year || 'Year unknown')}</div><div class="o">${esc(f.overview)}</div></div>
+              <div><div class="t">${esc(f.title)}</div><div class="y">${esc(f.year || 'Year unknown')}${f.kind === 'series' ? ' · Series' : ''}</div><div class="o">${esc(f.overview)}</div></div>
             </button>`).join('') : '<p class="notice">No matches. Try another spelling, or add it by hand.</p>';
         } catch (err) {
           let why;
           if (err.message === 'network') why = 'This device couldn’t reach TMDB. Try another network (mobile data or Wi-Fi), or turn off any ad blocker or private DNS.';
           else if (err.message === 'http 401') why = 'TMDB rejected the key in config.js. Check that it was copied completely, with nothing else on the line.';
           else why = 'TMDB returned an error (' + esc(err.message) + ').';
-          results.innerHTML = `<p class="notice">${why} You can also add the movie by hand below.</p>`;
+          results.innerHTML = `<p class="notice">${why} You can also add it by hand below.</p>`;
         }
       }, 350);
     });
@@ -644,11 +802,15 @@
       if (b) addMovie(found[Number(b.dataset.i)]);
     });
 
+    $('#mk').addEventListener('change', () => { $('#ms').hidden = $('#mk').value !== 'series'; });
     $('#manform').addEventListener('submit', (e) => {
       e.preventDefault();
       const title = $('#mt').value.trim();
       if (!title) return;
-      addMovie({ id: 'c' + Date.now(), title, year: $('#my').value.trim().slice(0, 4) });
+      addMovie({
+        id: 'c' + Date.now(), kind: $('#mk').value, title, year: $('#my').value.trim().slice(0, 4),
+        seasonCount: Math.min(60, parseInt($('#ms').value, 10) || 0),
+      });
     });
   }
 
